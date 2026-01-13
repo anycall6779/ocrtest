@@ -49,6 +49,16 @@ SECRET_KEY = "super_secret_security_key_change_this"
 DISCORD_WEBHOOK_URL = "" 
 # 예: "https://discord.com/api/webhooks/123456789/abcdefg..."
 
+# ▼▼▼ [추가됨] 고정 도메인 Cloudflare Tunnel 설정 ▼▼▼
+# Cloudflare Zero Trust 대시보드에서 터널을 생성하고 토큰을 복사하세요.
+# 토큰이 설정되면 고정 도메인으로 연결됩니다. 비워두면 임시 URL(trycloudflare.com)을 사용합니다.
+CLOUDFLARE_TUNNEL_TOKEN = ""
+# 예: "eyJhIjoiN2..."
+
+# 고정 도메인 주소 (표시용, 터널 설정에서 지정한 도메인과 동일하게 입력)
+CLOUDFLARE_TUNNEL_DOMAIN = ""
+# 예: "parking.example.com"
+
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
 
@@ -95,12 +105,57 @@ DLL_FUNCTIONS = [
     ('ReleaseOcrProcessOptions', [c_int64], None)
 ]
 
-# DLL 로드
+# ==========================================
+# DLL 자동 추출 및 로드
+# ==========================================
+# MORT 프로젝트 방식: Windows Snipping Tool/Photos 앱에서 DLL 자동 추출
+from pathlib import Path
+
+# PyInstaller 번들 환경 감지
+def is_pyinstaller_bundle():
+    """PyInstaller로 빌드된 EXE인지 확인"""
+    return getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+
 ocr_dll = None
 try:
-    dll_path = os.path.join(BASE_DIR, DLL_NAME)
+    # 1. DLL 폴더 경로 설정 (PyInstaller 환경 고려)
+    if is_pyinstaller_bundle():
+        # EXE로 실행 중: 번들된 DLL 사용
+        dll_dir = os.path.join(sys._MEIPASS, 'dlls')
+        print(f"📦 EXE 모드: 번들된 DLL 사용")
+    else:
+        # 소스로 실행 중: dlls 폴더 사용
+        dll_dir = os.path.join(BASE_DIR, 'dlls')
+    
+    dll_dir_path = Path(dll_dir)
+    
+    # 2. DLL이 없으면 자동 추출 시도 (소스 실행 시에만)
+    if not is_pyinstaller_bundle():
+        from dll_extractor import extract_oneocr_dlls, check_existing_dlls
+        
+        if not check_existing_dlls(dll_dir_path):
+            print("\n📦 DLL 파일이 없습니다. 자동 추출을 시도합니다...")
+            if not extract_oneocr_dlls(dest_dir=dll_dir):
+                print("\n💡 DLL 수동 설치 방법:")
+                print("   1. Microsoft Store에서 'Snipping Tool' 앱 설치")
+                print("   2. 또는 아래 경로에서 수동으로 파일 복사:")
+                print("      C:\\Program Files\\WindowsApps\\Microsoft.ScreenSketch_*\\SnippingTool\\")
+                print(f"   3. 필요한 파일: oneocr.dll, oneocr.onemodel, onnxruntime.dll")
+                print(f"   4. 대상 폴더: {dll_dir}")
+                sys.exit(1)
+    
+    # 3. DLL 경로 결정
+    dll_path = os.path.join(dll_dir, DLL_NAME)
+    model_path_full = os.path.join(dll_dir, MODEL_NAME)
+
+    # 4. PATH 환경변수에 DLL 폴더 추가 (의존성 문제 해결)
+    if os.path.exists(dll_dir):
+        os.add_dll_directory(dll_dir)
+        os.environ['PATH'] = dll_dir + ';' + os.environ['PATH']
+
     if not os.path.exists(dll_path):
         print(f"❌ 오류: {DLL_NAME} 파일을 찾을 수 없습니다.")
+        print(f"   탐색 경로: {dll_dir}")
         sys.exit(1)
         
     ocr_dll = ctypes.WinDLL(dll_path)
@@ -134,12 +189,14 @@ def suppress_output():
         os.close(devnull)
 
 class OcrEngine:
+    """OCR 엔진 래퍼 클래스 - 싱글톤 패턴으로 사용"""
+    
     def __init__(self):
         self.init_opts = c_int64()
         self._check(ocr_dll.CreateOcrInitOptions(byref(self.init_opts)), "InitOptions 생성 실패")
         self._check(ocr_dll.OcrInitOptionsSetUseModelDelayLoad(self.init_opts, 0), "DelayLoad 설정 실패")
         
-        model_path = os.path.join(BASE_DIR, MODEL_NAME).encode()
+        model_path = model_path_full.encode()
         self.pipeline = c_int64()
         
         with suppress_output():
@@ -153,6 +210,23 @@ class OcrEngine:
         self.proc_opts = c_int64()
         self._check(ocr_dll.CreateOcrProcessOptions(byref(self.proc_opts)), "ProcessOptions 생성 실패")
         ocr_dll.OcrProcessOptionsSetMaxRecognitionLineCount(self.proc_opts, 1000)
+        
+        # 리소스 관리 플래그
+        self._initialized = True
+
+    def __del__(self):
+        """리소스 정리 - 메모리 누수 방지"""
+        if hasattr(self, '_initialized') and self._initialized:
+            try:
+                if self.proc_opts.value:
+                    ocr_dll.ReleaseOcrProcessOptions(self.proc_opts)
+                if self.pipeline.value:
+                    ocr_dll.ReleaseOcrPipeline(self.pipeline)
+                if self.init_opts.value:
+                    ocr_dll.ReleaseOcrInitOptions(self.init_opts)
+            except:
+                pass
+            self._initialized = False
 
     def _check(self, code, msg):
         if code != 0:
@@ -313,27 +387,32 @@ def stitch_broken_plate(raw_text):
     return None
 
 def process_and_ocr(crop_img, start_time, timeout=3.0, is_full_image=False):
+    """이미지에서 번호판 텍스트 추출 (최적화 버전)"""
     if crop_img.ndim == 3:
         gray = cv2.cvtColor(crop_img, cv2.COLOR_BGR2GRAY)
     else:
         gray = crop_img
 
     if not is_full_image:
-        gray = mask_side_regions(gray, ratio=0.1)
+        gray = mask_side_regions(gray, ratio=0.08)  # 마스킹 비율 축소
 
-    filters = []
-    filters.append(("Gray+Pad", add_padding(gray)))
-    filters.append(("CLAHE", add_padding(apply_clahe(gray))))
-    filters.append(("Thresh", add_padding(apply_threshold(gray))))
+    # 최적화된 필터 순서 (가장 효과적인 것부터)
+    filters = [
+        ("CLAHE", add_padding(apply_clahe(gray), pad_size=15)),  # 패딩 축소
+        ("Gray+Pad", add_padding(gray, pad_size=15)),
+        ("Thresh", add_padding(apply_threshold(gray), pad_size=15)),
+    ]
     
-    kernel = np.ones((3, 3), np.uint8)
-    filters.append(("Dilate", add_padding(cv2.dilate(apply_threshold(gray), kernel, iterations=1))))
-    filters.append(("Invert", add_padding(cv2.bitwise_not(apply_threshold(gray)))))
+    # 전체 이미지가 아닌 경우에만 추가 필터 적용
+    if not is_full_image:
+        kernel = np.ones((2, 2), np.uint8)  # 커널 크기 축소
+        filters.append(("Dilate", add_padding(cv2.dilate(apply_threshold(gray), kernel, iterations=1), pad_size=15)))
 
+    # 스케일 최적화 (1.5배가 더 효율적)
     if is_full_image:
         scales = [1.0]
     else:
-        scales = [2.0, 1.0]
+        scales = [1.5, 1.0]  # 2.0 -> 1.5로 변경하여 속도 향상
 
     candidates = []
 
@@ -720,9 +799,15 @@ def send_discord_webhook(tunnel_url):
         print(f"⚠️ [Discord] 웹훅 전송 실패: {e}")
 
 def init_cloudflare_tunnel(port):
+    """
+    Cloudflare Tunnel 초기화
+    - CLOUDFLARE_TUNNEL_TOKEN이 설정된 경우: 고정 도메인 터널 사용
+    - 설정되지 않은 경우: Quick Tunnel (임시 trycloudflare.com URL) 사용
+    """
     cf_filename = "cloudflared.exe"
     cf_url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
 
+    # cloudflared 다운로드
     if not os.path.exists(cf_filename):
         print(f"⬇️ Cloudflare 다운로드 중...")
         try:
@@ -733,11 +818,45 @@ def init_cloudflare_tunnel(port):
         except Exception:
             return None
 
+    # 기존 프로세스 종료
     os.system("taskkill /f /im cloudflared.exe >nul 2>&1")
+    
+    # Windows에서 콘솔 창 숨기기
+    creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+    
+    # 고정 도메인 터널 (토큰 기반)
+    if CLOUDFLARE_TUNNEL_TOKEN:
+        print("🔗 고정 도메인 터널 시작 중...")
+        cmd = [cf_filename, "tunnel", "run", "--token", CLOUDFLARE_TUNNEL_TOKEN]
+        process = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding='utf-8', errors='replace',
+            creationflags=creation_flags
+        )
+        
+        # 터널 시작 대기 (연결 확인)
+        start_time = time.time()
+        while time.time() - start_time < 10:
+            line = process.stderr.readline()
+            if not line:
+                time.sleep(0.5)
+                continue
+            # 연결 성공 메시지 확인
+            if "Registered tunnel connection" in line or "connIndex" in line:
+                if CLOUDFLARE_TUNNEL_DOMAIN:
+                    return f"https://{CLOUDFLARE_TUNNEL_DOMAIN}"
+                else:
+                    return "[고정 도메인 - 설정에서 CLOUDFLARE_TUNNEL_DOMAIN 확인]"
+        
+        print("⚠️ 고정 터널 연결 시간 초과, Quick Tunnel로 전환...")
+
+    # Quick Tunnel (임시 URL)
+    print("🌐 Quick Tunnel 시작 중...")
     cmd = [cf_filename, "tunnel", "--url", f"http://localhost:{port}"]
     process = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
-        text=True, encoding='utf-8', errors='replace'
+        text=True, encoding='utf-8', errors='replace',
+        creationflags=creation_flags
     )
 
     tunnel_url = None
@@ -752,30 +871,93 @@ def init_cloudflare_tunnel(port):
     return tunnel_url
 
 if __name__ == '__main__':
-    PORT = 5000
-    HOST_IP = '127.0.0.1' 
+    import argparse
     
-    print("=" * 60)
-    print(f"🚀 [서버 시작] 보안 모드 (v2.1 Updated)")
-    if SYSTEM_PASSWORD:
-        print(f"🔑 외부 접속 비밀번호: {SYSTEM_PASSWORD}")
+    parser = argparse.ArgumentParser(description='주차 단속 시스템')
+    parser.add_argument('--gui', action='store_true', help='GUI 모드로 실행')
+    parser.add_argument('--server', action='store_true', help='웹 서버 모드로 실행')
+    parser.add_argument('--hybrid', action='store_true', help='하이브리드 모드 (GUI + 백그라운드 서버)')
+    parser.add_argument('--port', type=int, default=5000, help='웹 서버 포트 (기본: 5000)')
+    args = parser.parse_args()
+    
+    # 기본값: 인수 없이 실행하면 GUI 모드 (EXE 더블클릭 시)
+    if not args.gui and not args.server and not args.hybrid:
+        args.gui = True
+    
+    if args.gui or args.hybrid:
+        # GUI 모드 또는 하이브리드 모드 실행
+        try:
+            from gui import main as gui_main
+            mode_name = "하이브리드" if args.hybrid else "GUI"
+            print(f"🖥️ {mode_name} 모드로 시작합니다...")
+            gui_main(start_server=args.hybrid)  # 하이브리드면 서버도 시작
+        except ImportError as e:
+            print(f"❌ GUI 모듈 로드 실패: {e}")
+            print("   --server 옵션으로 웹 서버 모드를 사용하세요.")
+            sys.exit(1)
+        except Exception as e:
+            print(f"❌ GUI 실행 실패: {e}")
+            sys.exit(1)
     else:
-        print(f"🔓 비밀번호 미설정 (누구나 접속 가능)")
+        # 서버 모드 실행
+        PORT = args.port
+        HOST_IP = '127.0.0.1' 
         
-    print(f"📂 백업 폴더: {BACKUP_DIR}")
+        print("=" * 60)
+        print(f"🚀 [서버 시작] 보안 모드 (v2.2 - GUI 지원)")
+        if SYSTEM_PASSWORD:
+            print(f"🔑 외부 접속 비밀번호: {SYSTEM_PASSWORD}")
+        else:
+            print(f"🔓 비밀번호 미설정 (누구나 접속 가능)")
+            
+        print(f"📂 백업 폴더: {BACKUP_DIR}")
 
-    public_url = init_cloudflare_tunnel(PORT)
-    print("-" * 60)
-    if public_url:
-        print(f"🌍 [외부 접속 주소] : {public_url}")
-        # [추가됨] 웹훅 전송 호출
-        send_discord_webhook(public_url)
-    else:
-        print("❌ Cloudflare 터널 실패 (로컬 접속만 가능)")
+        public_url = init_cloudflare_tunnel(PORT)
+        print("-" * 60)
+        if public_url:
+            print(f"🌍 [외부 접속 주소] : {public_url}")
+            send_discord_webhook(public_url)
+        else:
+            print("❌ Cloudflare 터널 실패 (로컬 접속만 가능)")
 
-    print("-" * 60)
-    print(f"🏠 [로컬 접속 주소] : http://{HOST_IP}:{PORT}")
-    print("   (로컬 접속 시 비밀번호 없이 자동 로그인됩니다)")
-    print("=" * 60)
+        print("-" * 60)
+        print(f"🏠 [로컬 접속 주소] : http://{HOST_IP}:{PORT}")
+        print("   (로컬 접속 시 비밀번호 없이 자동 로그인됩니다)")
+        print("=" * 60)
+        print("   서버를 종료하려면 Ctrl+C를 누르세요.")
+        print("=" * 60)
 
-    serve(app, host=HOST_IP, port=PORT, threads=10, channel_timeout=3000)
+        # 종료 시 정리 함수
+        def cleanup():
+            print("\n🛑 서버 종료 중...")
+            # Cloudflare 프로세스 종료
+            os.system("taskkill /f /im cloudflared.exe >nul 2>&1")
+            print("✅ 정리 완료")
+        
+        # 종료 핸들러 등록
+        import atexit
+        import signal
+        
+        atexit.register(cleanup)
+        
+        def signal_handler(signum, frame):
+            cleanup()
+            sys.exit(0)
+        
+        signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
+        signal.signal(signal.SIGTERM, signal_handler)  # 종료 신호
+        
+        try:
+            # Windows에서 콘솔 창 닫기 이벤트 처리
+            if sys.platform == 'win32':
+                signal.signal(signal.SIGBREAK, signal_handler)
+        except (AttributeError, ValueError):
+            pass  # SIGBREAK가 없는 환경
+        
+        try:
+            serve(app, host=HOST_IP, port=PORT, threads=10, channel_timeout=3000)
+        except KeyboardInterrupt:
+            cleanup()
+        except Exception as e:
+            print(f"❌ 서버 오류: {e}")
+            cleanup()

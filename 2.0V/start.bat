@@ -1,13 +1,31 @@
 @echo off
-TITLE ScanBot Launcher
+chcp 65001 > nul
+TITLE 주차 단속 시스템
 
-:: 1. Change directory to the batch file's location
+:: 현재 디렉토리로 이동
 cd /d %~dp0
 
-:: 2. Start the Flask web app (web_app.py)
-echo [1/2] Starting Flask (web_app.py) server...
-START "ScanBot Server" python ocr.py
+echo ============================================
+echo   주차 단속 시스템 시작
+echo ============================================
+echo.
 
-:: 3. Wait 5 seconds for the server to initialize
-echo [2/2] Waiting 5 seconds for the server to initialize...
-timeout /t 5 /nobreak > nul
+:: 기존 프로세스 정리
+echo [1/3] 기존 프로세스 정리 중...
+taskkill /f /im cloudflared.exe >nul 2>&1
+echo 완료
+
+:: 서버 시작
+echo [2/3] 서버 시작 중...
+echo.
+python ocr.py --server
+
+:: 서버 종료 후 정리
+echo.
+echo [3/3] 정리 중...
+taskkill /f /im cloudflared.exe >nul 2>&1
+echo.
+echo ============================================
+echo   서버가 종료되었습니다.
+echo ============================================
+pause

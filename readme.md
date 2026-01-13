@@ -1,8 +1,8 @@
-# 🚗 주차 단속 시스템 v2.0
+# 🚗 주차 단속 시스템 (Parking Enforcement System)
 
 > 주차 단속 현장 사진에서 **차량 번호판을 자동으로 인식(OCR)**하고, 단속 내역을 **Excel 파일로 자동 저장**하는 웹 기반 시스템
 
-[![Build and Release](https://github.com/YOUR_USERNAME/ocrtest/actions/workflows/build-release.yml/badge.svg)](https://github.com/YOUR_USERNAME/ocrtest/actions/workflows/build-release.yml)
+[![Build and Release](https://github.com/hohofught/ocrtest/actions/workflows/build-release.yml/badge.svg)](https://github.com/hohofught/ocrtest/actions/workflows/build-release.yml)
 
 ---
 
@@ -10,11 +10,22 @@
 
 | 기능 | 설명 |
 |------|------|
-| **번호판 자동 인식** | YOLO + OneOCR 기반 고정밀 OCR |
+| **번호판 자동 인식** | YOLOv8 + OneOCR 기반 고정밀 OCR |
 | **웹 기반 인터페이스** | PC/모바일 브라우저에서 사진 업로드 |
+| **GUI 모드** | Tkinter 기반 데스크톱 앱으로 직접 실행 가능 |
 | **Excel 자동 저장** | 단속 내역을 날짜별 엑셀 파일로 저장 |
 | **외부 접속** | Cloudflare Tunnel로 외부 접속 URL 자동 생성 |
-| **GUI 모드** | 데스크톱 앱으로 직접 실행 가능 |
+| **Discord 알림** | 서버 시작 시 Discord 웹훅 알림 지원 |
+| **자동 DLL 추출** | Windows 앱에서 OCR 엔진 자동 추출 |
+
+---
+
+## 📦 버전 안내
+
+| 버전 | 폴더 | 설명 | 상태 |
+|------|------|------|------|
+| **v2.0 (권장)** | [`2.0V/`](./2.0V/) | OneOCR DLL 기반, GUI 모드 지원 | ✅ 활성 개발 |
+| **v1.0** | [`Windows/`](./Windows/) | Windows SDK OCR 사용 | 유지보수 |
 
 ---
 
@@ -22,9 +33,9 @@
 
 ### 방법 1: 릴리즈에서 EXE 다운로드 (권장)
 
-1. [Releases](../../releases) 페이지에서 최신 `주차단속시스템.exe` 다운로드
+1. [Releases](https://github.com/hohofught/ocrtest/releases) 페이지에서 최신 `주차단속시스템.exe` 다운로드
 2. 더블클릭으로 실행
-3. 자동으로 웹 브라우저가 열리면 사용 시작
+3. GUI 앱이 열리면 바로 사용 시작
 
 > ⚠️ 첫 실행 시 Windows Defender가 검사할 수 있습니다 (1~2분 소요)
 
@@ -32,28 +43,29 @@
 
 ```bash
 # 저장소 클론
-git clone https://github.com/YOUR_USERNAME/ocrtest.git
+git clone https://github.com/hohofught/ocrtest.git
 cd ocrtest/2.0V
 
 # 의존성 설치
 pip install -r requirements.txt
 
-# 실행
+# GUI 모드 실행
 python ocr.py
+
+# 서버 모드 실행
+python ocr.py --server
 ```
 
 ---
 
-## 🚀 실행 방법
-
-### 실행 모드
+## 🚀 실행 모드
 
 | 모드 | 명령어 | 설명 |
 |------|--------|------|
-| **GUI 모드** (기본) | `python ocr.py` 또는 EXE 더블클릭 | 데스크톱 앱으로 실행 |
-| **서버 모드** | `python ocr.py --server` | 웹 서버만 실행 |
+| **GUI 모드** (기본) | `python ocr.py` 또는 EXE 더블클릭 | 데스크톱 앱으로 실행, 이미지 직접 선택 |
+| **서버 모드** | `python ocr.py --server` | 웹 서버만 실행, 브라우저로 접속 |
 
-### 접속 주소
+### 접속 주소 (서버 모드)
 
 - **로컬 접속**: `http://127.0.0.1:5000`  
 - **외부 접속**: 콘솔에 표시되는 `https://xxx.trycloudflare.com`
@@ -66,7 +78,7 @@ python ocr.py
 
 ```python
 # 🔒 보안 비밀번호 (빈 문자열 = 비밀번호 없음)
-SYSTEM_PASSWORD = "1234"
+SYSTEM_PASSWORD = ""
 
 # 📍 단속 위치 목록
 LOCATIONS = ["1동", "2동", "3동", "4동", "5동", ...]
@@ -104,13 +116,15 @@ git tag v2.0.0
 git push origin v2.0.0
 ```
 
+자동으로 OCR DLL 다운로드 → PyInstaller 빌드 → GitHub Release 생성
+
 ---
 
 ## 📂 폴더 구조
 
 ```
 ocrtest/
-├── 2.0V/                    # 메인 프로젝트 폴더
+├── 2.0V/                    # 메인 프로젝트 (v2.0 - OneOCR DLL)
 │   ├── ocr.py               # 메인 서버 코드
 │   ├── gui.py               # GUI 인터페이스
 │   ├── dll_extractor.py     # DLL 자동 추출 모듈
@@ -122,6 +136,11 @@ ocrtest/
 │   ├── templates/           # HTML 템플릿
 │   ├── static/              # 정적 리소스
 │   └── uploads/             # [자동생성] 업로드된 이미지
+│
+├── Windows/                 # v1.0 (Windows SDK OCR)
+│   ├── ocr.py               # 메인 서버 코드
+│   ├── best.pt              # YOLO 모델
+│   └── templates/           # HTML 템플릿
 │
 ├── .github/workflows/       # GitHub Actions 설정
 │   └── build-release.yml    # 자동 빌드/릴리즈 워크플로우
@@ -160,11 +179,12 @@ ocrtest/
 
 | 구성요소 | 기술 |
 |----------|------|
-| **백엔드** | Python, Flask, Waitress |
-| **OCR 엔진** | OneOCR (Windows 내장 OCR 기반) |
+| **백엔드** | Python 3.8+, Flask, Waitress |
+| **OCR 엔진** | OneOCR DLL (Windows 내장 OCR 기반) |
 | **객체 탐지** | YOLOv8 (Ultralytics) |
-| **이미지 처리** | OpenCV, Pillow |
+| **이미지 처리** | OpenCV, Pillow, NumPy |
 | **데이터 처리** | Pandas, Openpyxl |
+| **GUI** | Tkinter |
 | **터널링** | Cloudflare Tunnel |
 
 ---

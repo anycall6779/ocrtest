@@ -53,8 +53,13 @@ jobs:
           Remove-Item $zipPath
           
           Write-Host "✅ DLL 다운로드 완료"
-          Get-ChildItem "dlls" | ForEach-Object { Write-Host "   - $($_.Name) ($([math]::Round($_.Length / 1MB, 2)) MB)" }
+          $dllFiles = Get-ChildItem "dlls"
+          foreach ($file in $dllFiles) {
+              $sizeMB = [math]::Round($file.Length / 1MB, 2)
+              Write-Host "   - $($file.Name) ($sizeMB MB)"
+          }
         shell: pwsh
+
 
       - name: Verify Required Files
         run: |

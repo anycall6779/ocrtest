@@ -1,53 +1,39 @@
-# 📸 주차 단속 시스템 (Parking Enforcement OCR)
+# 🚗 주차 단속 시스템 v2.0
 
-주차 단속 현장 사진에서 **차량 번호판을 자동으로 인식(OCR)**하고, 단속 내역을 **Excel 파일로 자동 저장**하는 웹 기반 시스템입니다.
+> 주차 단속 현장 사진에서 **차량 번호판을 자동으로 인식(OCR)**하고, 단속 내역을 **Excel 파일로 자동 저장**하는 웹 기반 시스템
 
-## 📌 주요 기능
-
-1. **웹 기반 인터페이스**: PC 및 모바일 브라우저에서 사진 업로드 및 관리
-2. **자동 번호판 인식**:
-   - YOLO 모델을 통한 차량/번호판 영역 검출
-   - 이미지 전처리(Grayscale, CLAHE, Threshold) 후 OCR 수행
-   - 오인식 방지 로직 (번호판 패턴 정규식 필터링)
-3. **데이터 관리**:
-   - 단속 위치, 사유, 시간대별 자동 폴더 분류
-   - Excel 자동 저장 (`주차단속내역_YYYY-MM-DD.xlsx`)
-   - 백업 시스템으로 데이터 유실 방지
-4. **네트워크 접근성**:
-   - Cloudflare Tunnel 자동 연동으로 외부 접속 URL 생성
-   - 로컬/외부 접속 구분 보안 기능
+[![Build and Release](https://github.com/YOUR_USERNAME/ocrtest/actions/workflows/build-release.yml/badge.svg)](https://github.com/YOUR_USERNAME/ocrtest/actions/workflows/build-release.yml)
 
 ---
 
-## 📂 버전 비교
+## ✨ 주요 기능
 
-이 프로젝트는 **세 가지 버전**을 제공합니다 (Windows, 2.0V, Linux):
-
-| 구분 | Windows 버전 | 2.0V 버전 |
-|------|--------------|-----------|
-| **위치** | `Windows/` 폴더 | `2.0V/` 폴더 |
-| **OCR 엔진** | Windows SDK (`winsdk`) | 전용 DLL (`oneocr.dll`) |
-| **장점** | 추가 파일 불필요 | 더 빠른 인식 속도 |
-| **단점** | Windows 10+ 필요 | DLL 파일 필요 |
-| **추가 기능** | - | Discord 알림, 스마트 로그인 |
-
-### 어떤 버전을 사용해야 할까요?
-
-- **Windows 10 이상** + **간편한 설치** → `Windows/` 버전 권장
-- **빠른 인식 속도** + **추가 기능** → `2.0V/` 버전 권장
+| 기능 | 설명 |
+|------|------|
+| **번호판 자동 인식** | YOLO + OneOCR 기반 고정밀 OCR |
+| **웹 기반 인터페이스** | PC/모바일 브라우저에서 사진 업로드 |
+| **Excel 자동 저장** | 단속 내역을 날짜별 엑셀 파일로 저장 |
+| **외부 접속** | Cloudflare Tunnel로 외부 접속 URL 자동 생성 |
+| **GUI 모드** | 데스크톱 앱으로 직접 실행 가능 |
 
 ---
 
-## 🛠 설치 및 실행
+## 📥 다운로드 및 설치
 
-### 공통 요구사항
-- **운영체제**: Windows 10 이상
-- **Python**: 3.8 이상 ([다운로드](https://www.python.org/downloads/))
+### 방법 1: 릴리즈에서 EXE 다운로드 (권장)
 
-### 설치 방법
+1. [Releases](../../releases) 페이지에서 최신 `주차단속시스템.exe` 다운로드
+2. 더블클릭으로 실행
+3. 자동으로 웹 브라우저가 열리면 사용 시작
+
+> ⚠️ 첫 실행 시 Windows Defender가 검사할 수 있습니다 (1~2분 소요)
+
+### 방법 2: 소스코드에서 직접 실행
+
 ```bash
-# 원하는 버전 폴더로 이동
-cd Windows   # 또는 cd 2.0V
+# 저장소 클론
+git clone https://github.com/YOUR_USERNAME/ocrtest.git
+cd ocrtest/2.0V
 
 # 의존성 설치
 pip install -r requirements.txt
@@ -56,118 +42,130 @@ pip install -r requirements.txt
 python ocr.py
 ```
 
-또는 각 폴더의 `start.bat` 파일을 더블클릭하세요.
+---
+
+## 🚀 실행 방법
+
+### 실행 모드
+
+| 모드 | 명령어 | 설명 |
+|------|--------|------|
+| **GUI 모드** (기본) | `python ocr.py` 또는 EXE 더블클릭 | 데스크톱 앱으로 실행 |
+| **서버 모드** | `python ocr.py --server` | 웹 서버만 실행 |
+
+### 접속 주소
+
+- **로컬 접속**: `http://127.0.0.1:5000`  
+- **외부 접속**: 콘솔에 표시되는 `https://xxx.trycloudflare.com`
 
 ---
 
-## 🚀 자동 빌드 및 릴리즈 (GitHub Actions)
+## ⚙️ 설정 변경
 
-이 저장소에는 **자동 빌드 및 릴리즈 시스템**이 구축되어 있습니다.
-GitHub에 새로운 태그(`v*`)를 푸시하면 자동으로 Windows용 EXE 파일을 빌드하고 Release를 생성합니다.
+`2.0V/ocr.py` 파일 상단에서 설정 변경 가능:
 
-### 사용 방법
+```python
+# 🔒 보안 비밀번호 (빈 문자열 = 비밀번호 없음)
+SYSTEM_PASSWORD = "1234"
 
-1. **태그 생성 및 푸시**:
-   버전 태그(예: `v1.0.0`)를 생성하고 GitHub에 푸시합니다.
-   ```bash
-   git tag v1.0.0
-   git push origin v1.0.0
-   ```
+# 📍 단속 위치 목록
+LOCATIONS = ["1동", "2동", "3동", "4동", "5동", ...]
 
-2. **자동 빌드 시작**:
-   GitHub Actions 탭에서 빌드 진행 상황을 확인할 수 있습니다.
-   - `Build Windows Version`: Windows 버전 빌드
-   - `Build 2.0V Version`: 2.0V 버전 빌드
+# 📋 단속 사유 목록
+REASONS = ["주차선 외 위반", "장애인 구역 위반", ...]
 
-3. **결과물 다운로드**:
-   빌드가 완료되면 [Releases](https://github.com/USERNAME/REPOSITORY/releases) 페이지에 자동으로 새 릴리즈가 생성되고, 다음 파일들이 첨부됩니다:
-   - `ParkingEnforcement-Windows.exe`
-   - `ParkingEnforcement-2.0V.exe`
+# 🔔 Discord 웹훅 URL (선택사항)
+DISCORD_WEBHOOK_URL = ""
+
+# 🌐 고정 도메인 Cloudflare Tunnel (선택사항)
+CLOUDFLARE_TUNNEL_TOKEN = ""
+CLOUDFLARE_TUNNEL_DOMAIN = "parking.example.com"
+```
 
 ---
 
-## 📦 독립 실행 파일 (EXE) 빌드
+## 📦 직접 빌드하기
 
-Python 없이 실행 가능한 단일 EXE 파일을 생성할 수 있습니다.
+### 로컬 빌드
 
-### 빌드 방법
 ```bash
-# 원하는 버전 폴더로 이동
-cd Windows   # 또는 cd 2.0V
-
-# 빌드 실행
+cd 2.0V
 build.bat
 ```
 
-### 빌드 결과
-- **생성 위치**: `dist/주차단속시스템.exe`
-- **파일 크기**: 약 200~400MB (모든 의존성 포함)
+빌드 완료 후 `dist/주차단속시스템.exe` 생성됨 (약 200~400MB)
+
+### GitHub Actions 자동 빌드
+
+태그를 푸시하면 자동으로 빌드 및 릴리즈됩니다:
+
+```bash
+git tag v2.0.0
+git push origin v2.0.0
+```
 
 ---
 
 ## 📂 폴더 구조
 
 ```
-ocrtest-main/
+ocrtest/
+├── 2.0V/                    # 메인 프로젝트 폴더
+│   ├── ocr.py               # 메인 서버 코드
+│   ├── gui.py               # GUI 인터페이스
+│   ├── dll_extractor.py     # DLL 자동 추출 모듈
+│   ├── requirements.txt     # Python 의존성
+│   ├── build.spec           # PyInstaller 빌드 설정
+│   ├── build.bat            # 빌드 스크립트
+│   ├── best.pt              # YOLO 모델 (번호판 탐지)
+│   ├── dlls/                # [자동생성] OCR 엔진 DLL
+│   ├── templates/           # HTML 템플릿
+│   ├── static/              # 정적 리소스
+│   └── uploads/             # [자동생성] 업로드된 이미지
 │
-├── readme.md           # 이 파일 (전체 프로젝트 설명)
+├── .github/workflows/       # GitHub Actions 설정
+│   └── build-release.yml    # 자동 빌드/릴리즈 워크플로우
 │
-├── Windows/            # Windows OCR 버전
-│   ├── ocr.py          # 메인 서버 코드
-│   ├── requirements.txt
-│   ├── build.spec      # PyInstaller 설정
-│   ├── build.bat       # EXE 빌드 스크립트
-│   ├── start.bat       # 서버 시작 스크립트
-│   ├── best.pt         # YOLO 모델
-│   ├── templates/      # HTML 템플릿
-│   └── static/         # 정적 리소스
-│
-└── 2.0V/               # DLL OCR 버전
-    ├── ocr.py          # 메인 서버 코드
-    ├── requirements.txt
-    ├── build.spec      # PyInstaller 설정
-    ├── build.bat       # EXE 빌드 스크립트
-    ├── start.bat       # 서버 시작 스크립트
-    ├── best.pt         # YOLO 모델
-    ├── oneocr.dll      # OCR 엔진 DLL
-    ├── oneocr.onemodel # OCR 모델 데이터
-    ├── onnxruntime.dll # ONNX 런타임
-    ├── templates/      # HTML 템플릿
-    └── static/         # 정적 리소스
-```
-
----
-
-## ⚙️ 설정 방법
-
-각 버전의 `ocr.py` 파일 상단에서 설정을 변경할 수 있습니다:
-
-```python
-# 보안 비밀번호 (빈 문자열 = 비밀번호 없음)
-SYSTEM_PASSWORD = "1234"
-
-# 단속 위치 목록
-LOCATIONS = ["1동", "2동", "3동", ...]
-
-# 단속 사유 목록
-REASONS = ["주차선 외 위반", "장애인 구역 위반", ...]
+└── readme.md                # 이 파일
 ```
 
 ---
 
 ## ⚠️ 트러블슈팅
 
+### "oneocr.dll을 찾을 수 없습니다" 오류
+
+1. **Snipping Tool 설치 확인**: Microsoft Store에서 'Snipping Tool' 앱 설치
+2. **DLL 수동 추출**: `python dll_extractor.py --force` 실행
+3. **수동 다운로드**: [oneocr.zip](https://github.com/killkimno/MORT_VERSION/releases/download/oneocr/oneocr.zip) 다운로드 후 `dlls/` 폴더에 압축 해제
+
 ### OCR 인식률이 낮은 경우
-- `best.pt` 파일이 있는지 확인하세요
+
+- `best.pt` 파일이 있는지 확인
 - 이미지가 너무 어둡거나 흐리면 인식률이 떨어집니다
 
 ### Excel 저장 실패
-- 해당 Excel 파일이 다른 프로그램에서 열려있는지 확인하세요
-- `backup/` 폴더에서 백업 파일을 확인할 수 있습니다
+
+- 해당 Excel 파일이 다른 프로그램에서 열려있는지 확인
+- `backup/` 폴더에 자동 백업됩니다
 
 ### Cloudflare Tunnel 실패
-- 인터넷 연결 상태를 확인하세요
-- 방화벽이 `cloudflared.exe` 실행을 차단하고 있는지 확인하세요
+
+- 인터넷 연결 상태 확인
+- 방화벽에서 `cloudflared.exe` 허용 필요
+
+---
+
+## 🔧 기술 스택
+
+| 구성요소 | 기술 |
+|----------|------|
+| **백엔드** | Python, Flask, Waitress |
+| **OCR 엔진** | OneOCR (Windows 내장 OCR 기반) |
+| **객체 탐지** | YOLOv8 (Ultralytics) |
+| **이미지 처리** | OpenCV, Pillow |
+| **데이터 처리** | Pandas, Openpyxl |
+| **터널링** | Cloudflare Tunnel |
 
 ---
 
@@ -176,7 +174,7 @@ REASONS = ["주차선 외 위반", "장애인 구역 위반", ...]
 | 구성요소 | 출처 |
 |----------|------|
 | YOLO 모델 (`best.pt`) | [MuhammadMoinFaisal/Computervisionprojects](https://github.com/MuhammadMoinFaisal/Computervisionprojects/tree/main/ANPR_YOLOv10/weights) |
-| OCR 엔진 (2.0V용) | [killkimno/MORT_VERSION](https://github.com/killkimno/MORT_VERSION/releases/download/oneocr/oneocr.zip) |
+| OCR 엔진 | [killkimno/MORT_VERSION](https://github.com/killkimno/MORT_VERSION/releases/download/oneocr/oneocr.zip) |
 
 ---
 

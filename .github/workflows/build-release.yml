@@ -4,14 +4,19 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build-2-0v:
-    name: Build 2.0V Version (DLL OCR)
+  build:
+    name: Build 2.0V Standalone EXE
     runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: 2.0V
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -19,56 +24,101 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: '3.12'
           cache: 'pip'
+          cache-dependency-path: 2.0V/requirements.txt
 
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r 2.0V/requirements.txt
+          pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Verify DLL Files
+      # DLL 자동 다운로드 (MORT 프로젝트에서 제공)
+      - name: Download OCR DLLs
         run: |
-          if (-not (Test-Path "2.0V/dlls/oneocr.dll")) { Write-Error "oneocr.dll not found in dlls folder!"; exit 1 }
-          if (-not (Test-Path "2.0V/dlls/oneocr.onemodel")) { Write-Error "oneocr.onemodel not found in dlls folder!"; exit 1 }
-          if (-not (Test-Path "2.0V/dlls/onnxruntime.dll")) { Write-Error "onnxruntime.dll not found in dlls folder!"; exit 1 }
+          Write-Host "📦 OCR DLL 다운로드 중..."
+          New-Item -ItemType Directory -Force -Path "dlls"
+          
+          $dllUrl = "https://github.com/killkimno/MORT_VERSION/releases/download/oneocr/oneocr.zip"
+          $zipPath = "oneocr.zip"
+          
+          Write-Host "   다운로드 URL: $dllUrl"
+          
+          try {
+              Invoke-WebRequest -Uri $dllUrl -OutFile $zipPath -TimeoutSec 120
+          } catch {
+              Write-Host "❌ DLL 다운로드 실패: $_"
+              throw "Failed to download OCR DLLs"
+          }
+          
+          Write-Host "   ZIP 파일 크기: $([math]::Round((Get-Item $zipPath).Length / 1MB, 2)) MB"
+          
+          Expand-Archive -Path $zipPath -DestinationPath "dlls" -Force
+          Remove-Item $zipPath
+          
+          Write-Host "✅ DLL 다운로드 완료"
+          Get-ChildItem "dlls" | ForEach-Object { Write-Host "   - $($_.Name) ($([math]::Round($_.Length / 1MB, 2)) MB)" }
         shell: powershell
 
-      - name: Build EXE
+      - name: Verify Required Files
         run: |
-          cd 2.0V
-          pyinstaller build.spec
+          $errors = @()
+          
+          if (!(Test-Path "dlls/oneocr.dll")) { $errors += "oneocr.dll not found" }
+          if (!(Test-Path "dlls/oneocr.onemodel")) { $errors += "oneocr.onemodel not found" }
+          if (!(Test-Path "dlls/onnxruntime.dll")) { $errors += "onnxruntime.dll not found" }
+          if (!(Test-Path "best.pt")) { $errors += "best.pt not found" }
+          
+          if ($errors.Count -gt 0) {
+              Write-Host "❌ 필수 파일 누락:"
+              $errors | ForEach-Object { Write-Host "   - $_" }
+              throw "Required files missing"
+          }
+          
+          Write-Host "✅ 필수 파일 확인 완료"
+        shell: powershell
+
+      - name: Build Standalone EXE
+        run: python -m PyInstaller build.spec --noconfirm
+
+      - name: Verify Build Output
+        run: |
+          if (!(Test-Path "dist/주차단속시스템.exe")) { throw "Build failed - EXE not found" }
+          $size = (Get-Item "dist/주차단속시스템.exe").Length / 1MB
+          Write-Host "✅ Build successful! EXE size: $([math]::Round($size, 2)) MB"
+        shell: powershell
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ParkingSystem-2.0V
+          name: 주차단속시스템_EXE
           path: 2.0V/dist/주차단속시스템.exe
+          retention-days: 30
+          compression-level: 0
 
-  release:
-    name: Create Release
-    needs: [build-2-0v]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download 2.0V Artifact
-        uses: actions/download-artifact@v4
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
         with:
-          name: ParkingSystem-2.0V
-          path: artifacts/2.0v
-
-      - name: Rename Artifact
-        run: |
-          mv artifacts/2.0v/주차단속시스템.exe ParkingEnforcement-2.0V.exe
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            ParkingEnforcement-2.0V.exe
+          files: 2.0V/dist/주차단속시스템.exe
           generate_release_notes: true
           draft: false
           prerelease: false
+          body: |
+            ## 📦 주차 단속 시스템 v2.0 릴리즈
+            
+            ### 다운로드
+            아래 `주차단속시스템.exe` 파일을 다운로드하여 실행하세요.
+            
+            ### 포함된 구성요소
+            - OneOCR DLL (Windows OCR 기반)
+            - YOLO 차량 번호판 인식 모델
+            - 웹 기반 사용자 인터페이스
+            
+            ### 실행 방법
+            1. `주차단속시스템.exe` 다운로드
+            2. 더블클릭으로 실행
+            3. 웹 브라우저에서 자동으로 열리는 주소로 접속
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

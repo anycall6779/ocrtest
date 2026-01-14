@@ -20,15 +20,6 @@
 
 ---
 
-## 📦 버전 안내
-
-| 버전 | 폴더 | 설명 | 상태 |
-|------|------|------|------|
-| **v2.0 (권장)** | [`2.0V/`](./2.0V/) | OneOCR DLL 기반, GUI 모드 지원 | ✅ 활성 개발 |
-| **v1.0** | [`Windows/`](./Windows/) | Windows SDK OCR 사용 | 유지보수 |
-
----
-
 ## 📥 다운로드 및 설치
 
 ### 방법 1: 릴리즈에서 EXE 다운로드 (권장)
@@ -44,7 +35,7 @@
 ```bash
 # 저장소 클론
 git clone https://github.com/hohofught/ocrtest.git
-cd ocrtest/2.0V
+cd ocrtest
 
 # 의존성 설치
 pip install -r requirements.txt
@@ -74,7 +65,7 @@ python ocr.py --server
 
 ## ⚙️ 설정 변경
 
-`2.0V/ocr.py` 파일 상단에서 설정 변경 가능:
+`ocr.py` 파일 상단에서 설정 변경 가능:
 
 ```python
 # 🔒 보안 비밀번호 (빈 문자열 = 비밀번호 없음)
@@ -101,7 +92,6 @@ CLOUDFLARE_TUNNEL_DOMAIN = "parking.example.com"
 ### 로컬 빌드
 
 ```bash
-cd 2.0V
 build.bat
 ```
 
@@ -124,28 +114,21 @@ git push origin v2.0.0
 
 ```
 ocrtest/
-├── 2.0V/                    # 메인 프로젝트 (v2.0 - OneOCR DLL)
-│   ├── ocr.py               # 메인 서버 코드
-│   ├── gui.py               # GUI 인터페이스
-│   ├── dll_extractor.py     # DLL 자동 추출 모듈
-│   ├── requirements.txt     # Python 의존성
-│   ├── build.spec           # PyInstaller 빌드 설정
-│   ├── build.bat            # 빌드 스크립트
-│   ├── best.pt              # YOLO 모델 (번호판 탐지)
-│   ├── dlls/                # [자동생성] OCR 엔진 DLL
-│   ├── templates/           # HTML 템플릿
-│   ├── static/              # 정적 리소스
-│   └── uploads/             # [자동생성] 업로드된 이미지
+├── ocr.py               # 메인 서버 코드
+├── gui.py               # GUI 인터페이스
+├── dll_extractor.py     # DLL 자동 추출 모듈
+├── settings_manager.py  # 설정 관리
+├── requirements.txt     # Python 의존성
+├── build.spec           # PyInstaller 빌드 설정
+├── build.bat            # 빌드 스크립트
+├── best.pt              # YOLO 모델 (번호판 탐지)
+├── dlls/                # [자동생성] OCR 엔진 DLL
+├── templates/           # HTML 템플릿
+├── static/              # 정적 리소스
+├── uploads/             # [자동생성] 업로드된 이미지
 │
-├── Windows/                 # v1.0 (Windows SDK OCR)
-│   ├── ocr.py               # 메인 서버 코드
-│   ├── best.pt              # YOLO 모델
-│   └── templates/           # HTML 템플릿
-│
-├── .github/workflows/       # GitHub Actions 설정
-│   └── build-release.yml    # 자동 빌드/릴리즈 워크플로우
-│
-└── readme.md                # 이 파일
+└── .github/workflows/   # GitHub Actions 설정
+    └── build-release.yml
 ```
 
 ---

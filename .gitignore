@@ -4,6 +4,13 @@ __pycache__/
 *.pyo
 *.pyd
 *.egg-info/
+.eggs/
+*.egg
+
+# 가상환경
+venv/
+env/
+.venv/
 
 # 빌드 산출물
 build/
@@ -28,10 +35,22 @@ cloudflared.exe
 .idea/
 *.swp
 *.swo
+*.sublime-*
 
 # 로컬 설정
 *.env
 .env.local
+.settings
 
 # 로그
 *.log
+
+# OS 파일
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 테스트/캐시
+.pytest_cache/
+.coverage
+htmlcov/

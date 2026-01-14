@@ -24,12 +24,33 @@ from ultralytics import YOLO
 from flask import Flask, render_template, request, send_from_directory, jsonify, redirect, url_for, session
 from waitress import serve
 
+# 설정 관리자 import
+from settings_manager import get_settings, init_settings
+
 # ==========================================
 # 1. 시스템 설정 및 라이브러리 로드
 # ==========================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-UPLOAD_DIR = os.path.join(BASE_DIR, 'uploads')
-BACKUP_DIR = os.path.join(BASE_DIR, 'backup')
+
+# 설정 관리자 초기화
+_app_settings = init_settings()
+
+# 동적 폴더 경로 (설정 파일에서 로드, 없으면 기본값)
+def get_upload_dir():
+    custom = _app_settings.get("input_folder", "")
+    return custom if custom else os.path.join(BASE_DIR, 'uploads')
+
+def get_backup_dir():
+    custom = _app_settings.get("output_folder", "")
+    return custom if custom else os.path.join(BASE_DIR, 'backup')
+
+def get_excel_dir():
+    custom = _app_settings.get("excel_save_folder", "")
+    return custom if custom else BASE_DIR
+
+# 기본 폴더 (이전 버전 호환용)
+UPLOAD_DIR = get_upload_dir()
+BACKUP_DIR = get_backup_dir()
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(BACKUP_DIR, exist_ok=True)
@@ -40,24 +61,25 @@ DLL_NAME = 'oneocr.dll'
 MODEL_KEY = b"kj)TGtrK>f]b[Piow.gU+nC@s\"\"\"\"\"\"4"
 
 # ==========================================
-# [보안 설정 & 디스코드 알림]
+# [보안 설정 & 디스코드 알림] - 설정 파일에서 동적 로드
 # ==========================================
 SYSTEM_PASSWORD = ""  
 SECRET_KEY = "super_secret_security_key_change_this"
 
-# ▼▼▼ [추가됨] 디스코드 웹훅 URL을 이곳에 입력하세요 ▼▼▼
-DISCORD_WEBHOOK_URL = "" 
-# 예: "https://discord.com/api/webhooks/123456789/abcdefg..."
+# 동적 설정 (설정 파일에서 로드)
+def get_discord_webhook_url():
+    return _app_settings.get("discord_webhook_url", "")
 
-# ▼▼▼ [추가됨] 고정 도메인 Cloudflare Tunnel 설정 ▼▼▼
-# Cloudflare Zero Trust 대시보드에서 터널을 생성하고 토큰을 복사하세요.
-# 토큰이 설정되면 고정 도메인으로 연결됩니다. 비워두면 임시 URL(trycloudflare.com)을 사용합니다.
+def get_cloudflare_tunnel_token():
+    return _app_settings.get("cloudflare_tunnel_token", "")
+
+def get_cloudflare_tunnel_domain():
+    return _app_settings.get("cloudflare_tunnel_domain", "")
+
+# 이전 버전 호환용 상수 (빈 문자열로 유지, 실제로는 함수 사용)
+DISCORD_WEBHOOK_URL = ""
 CLOUDFLARE_TUNNEL_TOKEN = ""
-# 예: "eyJhIjoiN2..."
-
-# 고정 도메인 주소 (표시용, 터널 설정에서 지정한 도메인과 동일하게 입력)
 CLOUDFLARE_TUNNEL_DOMAIN = ""
-# 예: "parking.example.com"
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
@@ -774,7 +796,8 @@ def report_page():
 
 # [추가됨] 디스코드 웹훅 전송 함수
 def send_discord_webhook(tunnel_url):
-    if not DISCORD_WEBHOOK_URL:
+    webhook_url = get_discord_webhook_url()
+    if not webhook_url:
         return
     
     data = {
@@ -793,7 +816,7 @@ def send_discord_webhook(tunnel_url):
     }
 
     try:
-        requests.post(DISCORD_WEBHOOK_URL, json=data)
+        requests.post(webhook_url, json=data)
         print("📨 [Discord] 웹훅 전송 완료")
     except Exception as e:
         print(f"⚠️ [Discord] 웹훅 전송 실패: {e}")
@@ -825,9 +848,12 @@ def init_cloudflare_tunnel(port):
     creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
     
     # 고정 도메인 터널 (토큰 기반)
-    if CLOUDFLARE_TUNNEL_TOKEN:
+    tunnel_token = get_cloudflare_tunnel_token()
+    tunnel_domain = get_cloudflare_tunnel_domain()
+    
+    if tunnel_token:
         print("🔗 고정 도메인 터널 시작 중...")
-        cmd = [cf_filename, "tunnel", "run", "--token", CLOUDFLARE_TUNNEL_TOKEN]
+        cmd = [cf_filename, "tunnel", "run", "--token", tunnel_token]
         process = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding='utf-8', errors='replace',
@@ -843,8 +869,8 @@ def init_cloudflare_tunnel(port):
                 continue
             # 연결 성공 메시지 확인
             if "Registered tunnel connection" in line or "connIndex" in line:
-                if CLOUDFLARE_TUNNEL_DOMAIN:
-                    return f"https://{CLOUDFLARE_TUNNEL_DOMAIN}"
+                if tunnel_domain:
+                    return f"https://{tunnel_domain}"
                 else:
                     return "[고정 도메인 - 설정에서 CLOUDFLARE_TUNNEL_DOMAIN 확인]"
         

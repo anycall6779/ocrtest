@@ -1,47 +1,60 @@
 <!DOCTYPE html>
 <html lang="ko">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>변경 사항</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        body { 
-            font-family: 'Malgun Gothic', sans-serif; 
-            padding: 20px; 
-            max-width: 800px; 
-            margin: 0 auto; 
+        body {
+            font-family: 'Malgun Gothic', sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
             background-color: #f9f9f9;
         }
-        h1 { 
-            border-bottom: 3px solid #28a745; 
-            padding-bottom: 15px; 
-            color: #333; 
+
+        h1 {
+            border-bottom: 3px solid #28a745;
+            padding-bottom: 15px;
+            color: #333;
             margin-bottom: 30px;
         }
-        
+
         /* 버전 박스 스타일 */
-        .version-block { 
-            background: white; 
-            padding: 20px; 
-            border-radius: 8px; 
-            margin-bottom: 20px; 
-            border-left: 5px solid #28a745; 
-            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        .version-block {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 5px solid #28a745;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
         }
-        
-        .date { 
-            font-weight: bold; 
-            color: #28a745; 
-            font-size: 1.1em; 
-            margin-bottom: 10px; 
+
+        .date {
+            font-weight: bold;
+            color: #28a745;
+            font-size: 1.1em;
+            margin-bottom: 10px;
             display: flex;
             align-items: center;
         }
-        .date i { margin-right: 8px; }
-        
-        ul { margin: 10px 0 0 0; padding-left: 20px; }
-        li { margin-bottom: 8px; line-height: 1.5; color: #555; }
+
+        .date i {
+            margin-right: 8px;
+        }
+
+        ul {
+            margin: 10px 0 0 0;
+            padding-left: 20px;
+        }
+
+        li {
+            margin-bottom: 8px;
+            line-height: 1.5;
+            color: #555;
+        }
 
         /* 구분 타이틀 스타일 추가 */
         .sub-title {
@@ -53,59 +66,103 @@
             padding-left: 5px;
             border-left: 3px solid #ddd;
         }
-        
-        .back-btn { 
-            display: inline-block; 
-            padding: 12px 25px; 
-            background: #555; 
-            color: white; 
-            text-decoration: none; 
-            border-radius: 5px; 
+
+        .back-btn {
+            display: inline-block;
+            padding: 12px 25px;
+            background: #555;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
             font-weight: bold;
             transition: background 0.3s;
         }
-        .back-btn:hover { background: #333; }
+
+        .back-btn:hover {
+            background: #333;
+        }
 
         /* 이미지 컨테이너 스타일 */
         .img-container {
             text-align: center;
             margin: 30px 0 20px 0;
         }
+
         .cyrene-img {
             max-width: 100%;
             height: auto;
             border-radius: 10px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
         }
     </style>
 </head>
+
 <body>
     <h1>📢 변경 사항 (Changelog)</h1>
 
     <div class="version-block">
-        <span class="date"><i class="far fa-calendar-check"></i> 2025.12.24</span>
-        
-        <span class="sub-title">✨ 대규모 업데이트 (v2.0)</span>
+        <span class="date"><i class="far fa-calendar-check"></i> 2026.08.12</span>
+
+        <span class="sub-title">🚘 번호판 인식 및 자동 보관 개선 (v2.4)</span>
         <ul>
-            <li><strong>[엔진 교체]</strong> Windows 내장 OCR에서 <strong>Windows Snipping Tool OCR 엔진(OneOCR)</strong>으로 핵심 OCR 엔진 교체</li>
-            <li><strong>[스마트 로그인]</strong> 내 컴퓨터(로컬)에서 접속 시 <strong>비밀번호 없이 자동 로그인</strong> (외부 접속만 비밀번호 요구)</li>
-            <li><strong>[저장 안정성]</strong> 엑셀 파일이 켜져 있어도 저장이 실패하지 않도록 <strong>'선 백업 - 후 저장'</strong> 시스템 도입</li>
-            <li><strong>[보안 강화]</strong> 네트워크 구성을 로컬 전용(127.0.0.1)으로 변경하여 외부 해킹 위협 원천 차단</li>
-            <li><strong>[웹훅 기능]</strong> 클라우드플레어 연동 시 디스코드 웹훅을 통해 링크를 전송시킬 수 있는 기능 추가</li>
-           <li style="text-decoration: line-through; color: #363636; font-size: 0.9em;">
-            <strong>[에휴]</strong> 얘는 왜 크리스마스 전날에도 똥코딩 하나요?
-        </li>
-                <span class="sub-title" style="color: #e67e22;">🚧 예정 사항</span>
-        <ul>
-            <li>디자인 개선 예정</li>
-            <li>사용 가이드북 재작성</li>
-            <li>기타 편의 기능 추가 등</li>
+            <li><strong>[한글 인식 개선]</strong> 대한민국 자동차 번호판에 사용되는 한글 용도기호만 검증하고, 기존 Excel 이력을 활용해
+                <strong>년→너, 매→마, 세→서</strong>와 같은 반복 오인식을 보정하도록 개선</li>
+            <li><strong>[후보 투표]</strong> 여러 이미지 전처리 결과를 비교하고 반복 인식 결과와 과거 번호판 이력을 함께 반영하도록 개선</li>
+            <li><strong>[이미지 개선]</strong> CLAHE, Unsharp, Otsu 이진화와 다중 확대 배율을 적용해 흐리거나 기울어진 번호판의 인식 가능성 향상</li>
+            <li><strong>[분석 속도 향상]</strong> 전처리를 필요한 순간에만 생성하고 2회 일치 시 조기 확정하며, 전체 이미지 크기와 YOLO 탐지 수를 제한해
+                불필요한 OCR 연산과 메모리 정리를 줄임</li>
+            <li><strong>[충돌 방지]</strong> 숫자 부분이 같더라도 과거에 서로 다른 정상 번호판이 존재하면 임의로 강제 교정하지 않도록 보호</li>
+            <li><strong>[단속 항목]</strong> 2부제 및 5부제 시행 기간에 사용할 수 있도록 <strong>2·5부제 위반</strong> 단속 사유 추가</li>
+            <li><strong>[자동 보관]</strong> 수정 후 48시간이 지난 최상단 Excel은 <code>backup\excel</code>로, 업로드 이미지는
+                기존 폴더 구조를 유지하여 <code>backup\images</code>로 자동 이동</li>
+            <li><strong>[주기적 정리]</strong> 프로그램 시작 시 즉시 확인하고, 장기 실행 중에는 6시간마다 오래된 파일을 다시 정리</li>
+            <li style="color: #c0392b; font-weight: bold; margin-top: 14px;">
+                <strong>[개발자의 감정 호소]</strong> 엑셀이 틀린다고 찾아와 혼내는 과정에서 마음과 심장이 많이 힘들었습니다. 이제는 프로그램이
+                먼저 꼼꼼하게 확인하도록 개선했으니 조금만 따뜻하게 지켜봐 주세요. 🥲
+            </li>
         </ul>
     </div>
 
     <div class="version-block">
+        <span class="date"><i class="far fa-calendar-check"></i> 2025.02.03</span>
+
+        <span class="sub-title">🌐 네트워크 & 업로드 개선 (v2.3)</span>
+        <ul>
+            <li><strong>[고정 도메인]</strong> Cloudflare Tunnel 고정 도메인 적용 - <a href="https://sejongdansok.qzz.io/"
+                    target="_blank"><strong>https://sejongdansok.qzz.io/</strong></a> 로 언제든 접속 가능 (단, 해당 도메인은 언제든지 변경 및
+                종료가 될 수 있다는 점 참고해주세요)</li>
+            <li><strong>[분할 업로드]</strong> 20장 초과 업로드 시 <strong>자동 분할 업로드</strong> 기능 추가 (20장씩 나눠서 전송)</li>
+            <li><strong>[오류 처리]</strong> 디스크 용량 부족 시 <strong>명확한 오류 메시지</strong> 표시</li>
+            <li><strong>[업로드 한도]</strong> 최대 업로드 크기 500MB로 확대</li>
+
+        </ul>
+    </div>
+
+    <div class="version-block">
+        <span class="date"><i class="far fa-calendar-check"></i> 2025.12.24</span>
+
+        <span class="sub-title">✨ 대규모 업데이트 (v2.0)</span>
+        <ul>
+            <li><strong>[엔진 교체]</strong> Windows 내장 OCR에서 <strong>Windows Snipping Tool OCR 엔진(OneOCR)</strong>으로 핵심 OCR
+                엔진 교체</li>
+            <li><strong>[스마트 로그인]</strong> 내 컴퓨터(로컬)에서 접속 시 <strong>비밀번호 없이 자동 로그인</strong> (외부 접속만 비밀번호 요구)</li>
+            <li><strong>[저장 안정성]</strong> 엑셀 파일이 켜져 있어도 저장이 실패하지 않도록 <strong>'선 백업 - 후 저장'</strong> 시스템 도입</li>
+            <li><strong>[보안 강화]</strong> 네트워크 구성을 로컬 전용(127.0.0.1)으로 변경하여 외부 해킹 위협 원천 차단</li>
+            <li><strong>[웹훅 기능]</strong> 클라우드플레어 연동 시 디스코드 웹훅을 통해 링크를 전송시킬 수 있는 기능 추가</li>
+            <li style="text-decoration: line-through; color: #363636; font-size: 0.9em;">
+                <strong>[에휴]</strong> 얘는 왜 크리스마스 전날에도 똥코딩 하나요?
+            </li>
+            <span class="sub-title" style="color: #e67e22;">🚧 예정 사항</span>
+            <ul>
+                <li>디자인 개선 예정</li>
+                <li>사용 가이드북 재작성</li>
+                <li>기타 편의 기능 추가 등</li>
+            </ul>
+    </div>
+
+    <div class="version-block">
         <span class="date"><i class="far fa-calendar-check"></i> 2025.12.22</span>
-        
+
         <span class="sub-title">✅ 변경점</span>
         <ul>
             <li><strong>[OCR 성능 대폭 개선]</strong> YOLO 모델 적용으로 대충 찍은 사진도 인식이 잘 됩니다.</li>
@@ -143,4 +200,5 @@
         <a href="/" class="back-btn"><i class="fas fa-home"></i> 메인으로 돌아가기</a>
     </center>
 </body>
+
 </html>

@@ -26,6 +26,14 @@ from waitress import serve
 
 # 설정 관리자 import
 from settings_manager import get_settings, init_settings
+from archive_manager import archive_expired_files
+from plate_rules import (
+    PlateHistoryIndex,
+    choose_best_candidate,
+    extract_plate_candidates,
+    is_valid_plate,
+    normalize_plate_candidate,
+)
 
 # ==========================================
 # 1. 시스템 설정 및 라이브러리 로드
@@ -48,12 +56,117 @@ def get_excel_dir():
     custom = _app_settings.get("excel_save_folder", "")
     return custom if custom else BASE_DIR
 
+
+_plate_history_index = None
+_plate_history_lock = threading.Lock()
+
+
+def _history_workbooks():
+    """누적 백업 중 날짜/시간대별 최종 스냅샷만 선택한다."""
+    search_roots = {
+        os.path.abspath(get_excel_dir()),
+        os.path.abspath(os.path.join(BASE_DIR, "excel")),
+        os.path.abspath(get_backup_dir()),
+    }
+    grouped = {}
+    for root in search_roots:
+        if not os.path.isdir(root):
+            continue
+        for current_root, _, files in os.walk(root):
+            for filename in files:
+                if not filename.lower().endswith(".xlsx") or filename.startswith("~$"):
+                    continue
+                path = os.path.join(current_root, filename)
+                date_match = re.search(r"\d{4}-\d{2}-\d{2}", filename) or re.search(r"\d{4}-\d{2}-\d{2}", current_root)
+                date_key = date_match.group(0) if date_match else os.path.dirname(path)
+                shift = "오후" if "오후" in filename else "오전" if "오전" in filename else "기타"
+                key = (date_key, shift)
+                # 메인 누적 파일을 우선하고, 같은 종류에서는 가장 최근 파일을 사용한다.
+                priority = (1 if filename.startswith("주차단속내역_") else 0, os.path.getmtime(path))
+                if key not in grouped or priority > grouped[key][0]:
+                    grouped[key] = (priority, path)
+    return [item[1] for item in grouped.values()]
+
+
+def get_plate_history_index():
+    """기존 Excel의 사용자 확인 결과를 한 번만 읽어 OCR 사전확률로 사용한다."""
+    global _plate_history_index
+    if _plate_history_index is not None:
+        return _plate_history_index
+    with _plate_history_lock:
+        if _plate_history_index is not None:
+            return _plate_history_index
+        plates = []
+        seen_rows = set()
+        for path in _history_workbooks():
+            try:
+                frame = pd.read_excel(path, dtype=str)
+                if "차량번호" not in frame.columns:
+                    continue
+                for _, row in frame.fillna("").iterrows():
+                    plate = str(row.get("차량번호", "")).replace(" ", "")
+                    record_key = (
+                        str(row.get("날짜", "")), str(row.get("시간대", "")),
+                        str(row.get("단속위치", "")), str(row.get("사유", "")), plate,
+                    )
+                    if record_key not in seen_rows:
+                        seen_rows.add(record_key)
+                        plates.append(plate)
+            except Exception as exc:
+                print(f"⚠️ 번호판 이력 읽기 실패: {os.path.basename(path)} ({exc})")
+        _plate_history_index = PlateHistoryIndex.from_plates(plates)
+        print(f"📚 번호판 이력 인덱스: {len(plates)}건 / {len(_plate_history_index.counts)}개 숫자 패턴")
+        return _plate_history_index
+
 # 기본 폴더 (이전 버전 호환용)
 UPLOAD_DIR = get_upload_dir()
 BACKUP_DIR = get_backup_dir()
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(BACKUP_DIR, exist_ok=True)
+
+# ==========================================
+# 오래된 Excel/이미지 자동 보관
+# ==========================================
+_archive_maintenance_started = False
+_archive_maintenance_lock = threading.Lock()
+
+
+def run_archive_maintenance():
+    result = archive_expired_files(
+        base_dir=BASE_DIR,
+        upload_dir=UPLOAD_DIR,
+        retention_days=2,
+    )
+    if result.excel_moved or result.images_moved or result.errors:
+        print(
+            f"🗄️ 자동 보관: Excel {result.excel_moved}개, "
+            f"이미지 {result.images_moved}개 이동, 오류 {result.errors}개"
+        )
+    return result
+
+
+def _archive_maintenance_worker():
+    while True:
+        try:
+            run_archive_maintenance()
+        except Exception as exc:
+            print(f"⚠️ 자동 보관 작업 실패: {exc}")
+        # 서버/GUI 장기 실행 중에도 6시간마다 다시 확인한다.
+        time.sleep(6 * 60 * 60)
+
+
+def start_archive_maintenance():
+    global _archive_maintenance_started
+    with _archive_maintenance_lock:
+        if _archive_maintenance_started:
+            return
+        _archive_maintenance_started = True
+        thread = threading.Thread(target=_archive_maintenance_worker, daemon=True, name="archive-maintenance")
+        thread.start()
+
+
+start_archive_maintenance()
 
 # OCR 설정 (DLL 및 모델 파일명)
 MODEL_NAME = 'oneocr.onemodel'
@@ -83,6 +196,7 @@ CLOUDFLARE_TUNNEL_DOMAIN = ""
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB 최대 업로드
 
 # 전역 변수
 excel_lock = threading.Lock()
@@ -314,12 +428,15 @@ else:
 
 LOCATIONS = [
     "1동", "2동", "3동", "4동", "5동", "6동", "7동", "8동", "9동", "10동",
-    "11동", "12동", "13동", "14동", "15동", "중앙동", "민원동", "2청사"
+    "11동", "12동", "13동", "14동", "15동", "중앙동", "민원동", "2청사", "2동 옥외",
+    "7동 옥외", "8동 옥외", "9동 옥외", "10동 옥외", "10동 임시1", "10동 임시2",
+    "11동 옥외", "13-1 옥외", "13-2 옥외", "14-1 임시", "14-2 임시", "15-1 옥외",
+    "15-2 옥외", "15-3 옥외", "문화관", "중앙동 임시", "C26,C27"
 ]
 REASONS = [
     "주차선 외 위반", "경차 구역 위반", "임산부 구역 위반",
-    "방문객 전용 구역 위반", "전기차 구역 위반", "지하주차장 통로 위반",
-    "장애인 구역 위반", "소방차 전용구역 위반", "주차금지구역위반"
+    "방문객 전용 구역 위반", "전기차 구역 위반", "지하주차장 통로, 통행, 방해주차 위반",
+    "장애인 구역 위반, 지정주차 구역(업무용포함)", "소방차 전용구역 위반", "주차금지구역위반 (필로티 등)", "2,5부제 위반"
 ]
 
 # ==========================================
@@ -359,6 +476,14 @@ def apply_threshold(gray_img):
     blurred = cv2.GaussianBlur(gray_img, (5, 5), 0)
     return cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
 
+def apply_otsu(gray_img):
+    blurred = cv2.GaussianBlur(gray_img, (3, 3), 0)
+    return cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+
+def apply_unsharp(gray_img):
+    blurred = cv2.GaussianBlur(gray_img, (0, 0), 1.2)
+    return cv2.addWeighted(gray_img, 1.8, blurred, -0.8, 0)
+
 def fix_common_errors(text):
     text = text.upper()
     text = text.replace('O', '0').replace('o', '0')
@@ -374,8 +499,8 @@ def clean_text(text):
     return re.sub(r'[^0-9가-힣]', '', text)
 
 def find_plate_pattern(text):
-    match = re.search(r'(\d{2,3}[가-힣]\d{4})', text)
-    return match.group(1) if match else None
+    candidates = extract_plate_candidates(text, get_plate_history_index())
+    return candidates[0] if candidates else None
 
 def mask_side_regions(img, ratio=0.1):
     h, w = img.shape[:2]
@@ -386,16 +511,8 @@ def mask_side_regions(img, ratio=0.1):
     return masked
 
 def smart_plate_filter(text):
-    text = clean_text(text)
-    if re.fullmatch(r'\d{2,3}[가-힣]\d{4}', text):
-        return text
-    front_bolt_match = re.search(r'(\d{2,3}[가-힣])0(\d{4})', text)
-    if front_bolt_match:
-        return front_bolt_match.group(1) + front_bolt_match.group(2)
-    rear_bolt_match = re.search(r'(\d{2,3}[가-힣]\d{4})0', text)
-    if rear_bolt_match:
-        return rear_bolt_match.group(1)
-    return find_plate_pattern(text)
+    candidates = extract_plate_candidates(fix_common_errors(text), get_plate_history_index())
+    return candidates[0] if candidates else None
 
 def stitch_broken_plate(raw_text):
     text = fix_common_errors(raw_text)
@@ -403,12 +520,12 @@ def stitch_broken_plate(raw_text):
     backs = re.findall(r'\d{4}', text)
     for f in fronts:
         for b in backs:
-            combined = f + b
-            if find_plate_pattern(combined):
+            combined = normalize_plate_candidate(f + b, get_plate_history_index())
+            if combined:
                 return combined
     return None
 
-def process_and_ocr(crop_img, start_time, timeout=3.0, is_full_image=False):
+def process_and_ocr(crop_img, start_time, timeout=5.0, is_full_image=False):
     """이미지에서 번호판 텍스트 추출 (최적화 버전)"""
     if crop_img.ndim == 3:
         gray = cv2.cvtColor(crop_img, cv2.COLOR_BGR2GRAY)
@@ -416,53 +533,60 @@ def process_and_ocr(crop_img, start_time, timeout=3.0, is_full_image=False):
         gray = crop_img
 
     if not is_full_image:
-        gray = mask_side_regions(gray, ratio=0.08)  # 마스킹 비율 축소
+        gray = mask_side_regions(gray, ratio=0.03)
 
-    # 최적화된 필터 순서 (가장 효과적인 것부터)
-    filters = [
-        ("CLAHE", add_padding(apply_clahe(gray), pad_size=15)),  # 패딩 축소
-        ("Gray+Pad", add_padding(gray, pad_size=15)),
-        ("Thresh", add_padding(apply_threshold(gray), pad_size=15)),
+    # 필터를 미리 전부 만들지 않고 실제 OCR 시도 직전에 생성한다.
+    # 앞쪽 시도에서 번호판이 확정되면 무거운 이진화/팽창 연산을 완전히 생략할 수 있다.
+    filter_factories = [
+        ("CLAHE", lambda: add_padding(apply_clahe(gray), pad_size=15)),
+        ("Gray+Pad", lambda: add_padding(gray, pad_size=15)),
+        ("Otsu", lambda: add_padding(apply_otsu(gray), pad_size=15)),
+        ("Unsharp", lambda: add_padding(apply_unsharp(gray), pad_size=15)),
+        ("Thresh", lambda: add_padding(apply_threshold(gray), pad_size=15)),
     ]
-    
-    # 전체 이미지가 아닌 경우에만 추가 필터 적용
     if not is_full_image:
-        kernel = np.ones((2, 2), np.uint8)  # 커널 크기 축소
-        filters.append(("Dilate", add_padding(cv2.dilate(apply_threshold(gray), kernel, iterations=1), pad_size=15)))
+        filter_factories.append((
+            "Dilate",
+            lambda: add_padding(
+                cv2.dilate(apply_threshold(gray), np.ones((2, 2), np.uint8), iterations=1),
+                pad_size=15,
+            ),
+        ))
 
-    # 스케일 최적화 (1.5배가 더 효율적)
-    if is_full_image:
-        scales = [1.0]
-    else:
-        scales = [1.5, 1.0]  # 2.0 -> 1.5로 변경하여 속도 향상
+    # 1.5배가 속도/인식률 균형이 가장 좋아 먼저 시도한다.
+    scales = [1.0] if is_full_image else [1.5, 2.0, 1.0]
 
     candidates = []
+    history = get_plate_history_index()
 
+    processed_cache = {}
     for scale in scales:
-        for _, processed_img in filters:
+        for filter_name, factory in filter_factories:
             if time.time() - start_time > timeout:
                 break
             
             try:
+                if filter_name not in processed_cache:
+                    processed_cache[filter_name] = factory()
+                processed_img = processed_cache[filter_name]
                 if scale != 1.0:
                     target_img = cv2.resize(processed_img, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
                 else:
                     target_img = processed_img
 
                 raw_text = global_ocr.recognize_numpy(target_img)
-                plate = smart_plate_filter(raw_text)
+                found = extract_plate_candidates(fix_common_errors(raw_text), history)
 
-                if plate:
-                    candidates.append(plate)
-                    if is_full_image:
-                        return [plate]
-                    if candidates.count(plate) >= 2:
-                        return [plate]
-                
+                if found:
+                    candidates.extend(found)
+                    best_so_far = choose_best_candidate(candidates, history)
+                    # 서로 다른 전처리에서 두 번 일치하면 남은 고비용 필터를 생략한다.
+                    if best_so_far and candidates.count(best_so_far) >= 2:
+                        return [best_so_far]
                 elif is_full_image:
                     stitched = stitch_broken_plate(raw_text)
                     if stitched:
-                        return [stitched]
+                        candidates.append(stitched)
 
             except Exception:
                 pass
@@ -471,14 +595,17 @@ def process_and_ocr(crop_img, start_time, timeout=3.0, is_full_image=False):
             break
 
     if candidates:
-        most_common = Counter(candidates).most_common(1)
-        return [most_common[0][0]]
+        best = choose_best_candidate(candidates, history)
+        return [best] if best else []
     
     return []
 
 def detect_best_plate(img_path):
+    # 최초 1회 Excel 이력 로딩 시간은 이미지 OCR 제한 시간에 포함하지 않는다.
+    get_plate_history_index()
     start_time = time.time()
-    timeout = 3.0
+    # 속도보다 정확도를 우선한다. YOLO와 여러 OCR 전처리의 총 허용 시간.
+    timeout = 5.0
     log_lines = []
     best_plate = ""
 
@@ -491,7 +618,7 @@ def detect_best_plate(img_path):
 
     if model:
         try:
-            results = model(original_img, conf=0.25, verbose=False)
+            results = model.predict(original_img, conf=0.25, imgsz=640, max_det=5, verbose=False)
             for r in results:
                 for box in r.boxes:
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
@@ -506,7 +633,17 @@ def detect_best_plate(img_path):
         except Exception as e:
             log_lines.append(f"YOLO Error: {e}")
 
-    candidates_boxes.append({'y2': h, 'crop': original_img, 'is_full': True})
+    # YOLO가 실패했을 때의 전체 이미지 OCR은 장축을 1600px로 제한해 처리량을 줄인다.
+    full_scan_img = original_img
+    max_side = max(h, w)
+    if max_side > 1600:
+        resize_ratio = 1600.0 / max_side
+        full_scan_img = cv2.resize(
+            original_img,
+            (max(1, int(w * resize_ratio)), max(1, int(h * resize_ratio))),
+            interpolation=cv2.INTER_AREA,
+        )
+    candidates_boxes.append({'y2': h, 'crop': full_scan_img, 'is_full': True})
     candidates_boxes.sort(key=lambda x: (x['is_full'], -x['y2']))
 
     plate_found = False
@@ -553,7 +690,9 @@ def background_processing(task_id, file_paths, location, reason, ampm):
             
             web_url = "/uploads/" + urllib.parse.quote(os.path.relpath(path, UPLOAD_DIR).replace('\\', '/'))
             results_list.append({'filename': filename, 'plate': plate, 'image_url': web_url})
-            gc.collect()
+            # 매 이미지마다 강제 GC를 실행하면 배치 처리량이 크게 떨어진다.
+            if (idx + 1) % 10 == 0:
+                gc.collect()
 
         tasks[task_id]['results'] = results_list
         tasks[task_id]['report_text'] = f"{location} {reason} ({ampm}) - 총 {total}건"
@@ -592,6 +731,117 @@ def logout():
 def index():
     return render_template('index.html', locations=LOCATIONS, reasons=REASONS)
 
+# 분할 업로드 세션 저장소
+upload_sessions = {}
+
+@app.route('/upload/start_session', methods=['POST'])
+@login_required
+def start_upload_session():
+    """분할 업로드 세션 시작"""
+    session_id = str(uuid.uuid4())
+    data = request.get_json()
+    
+    loc = data.get('location', '위치 미지정')
+    reason = data.get('reason', '사유 미지정')
+    ampm = data.get('ampm', '오전')
+    total_files = data.get('total_files', 0)
+    
+    save_path = os.path.join(UPLOAD_DIR, datetime.now().strftime('%Y.%m.%d'), loc, ampm, reason)
+    os.makedirs(save_path, exist_ok=True)
+    
+    upload_sessions[session_id] = {
+        'location': loc,
+        'reason': reason,
+        'ampm': ampm,
+        'save_path': save_path,
+        'total_files': total_files,
+        'uploaded_files': [],
+        'uploaded_count': 0,
+        'status': 'uploading'
+    }
+    
+    return jsonify({'session_id': session_id, 'status': 'started'})
+
+@app.route('/upload/add_batch/<session_id>', methods=['POST'])
+@login_required
+def add_batch_to_session(session_id):
+    """세션에 파일 배치 추가"""
+    if session_id not in upload_sessions:
+        return jsonify({'error': 'Invalid session'}), 404
+    
+    session = upload_sessions[session_id]
+    save_path = session['save_path']
+    
+    files = request.files.getlist('photos')
+    saved_count = 0
+    
+    for f in files:
+        if f.filename:
+            safe_name = os.path.basename(f.filename)
+            # 파일명 중복 방지
+            base, ext = os.path.splitext(safe_name)
+            counter = 1
+            final_path = os.path.join(save_path, safe_name)
+            while os.path.exists(final_path):
+                final_path = os.path.join(save_path, f"{base}_{counter}{ext}")
+                counter += 1
+            
+            try:
+                f.save(final_path)
+                session['uploaded_files'].append(final_path)
+                saved_count += 1
+            except OSError as e:
+                if e.errno == 28:
+                    return jsonify({'error': '디스크 용량이 가득 찼습니다!'}), 507
+                raise
+    
+    session['uploaded_count'] += saved_count
+    
+    return jsonify({
+        'status': 'ok',
+        'batch_saved': saved_count,
+        'total_uploaded': session['uploaded_count']
+    })
+
+@app.route('/upload/finish/<session_id>', methods=['POST'])
+@login_required
+def finish_upload_session(session_id):
+    """업로드 세션 완료 및 OCR 처리 시작"""
+    if session_id not in upload_sessions:
+        return jsonify({'error': 'Invalid session'}), 404
+    
+    session = upload_sessions[session_id]
+    saved_files = session['uploaded_files']
+    
+    if not saved_files:
+        del upload_sessions[session_id]
+        return jsonify({'error': '업로드된 파일이 없습니다.'}), 400
+    
+    # OCR 처리 태스크 생성
+    task_id = str(uuid.uuid4())
+    tasks[task_id] = {
+        'total': len(saved_files), 'current': 0, 'status': 'processing',
+        'last_processed': '', 'results': [], 
+        'location': session['location'], 'reason': session['reason']
+    }
+    
+    # 백그라운드 처리 시작
+    thread = threading.Thread(
+        target=background_processing, 
+        args=(task_id, saved_files, session['location'], session['reason'], session['ampm'])
+    )
+    thread.daemon = True
+    thread.start()
+    
+    # 세션 정리
+    del upload_sessions[session_id]
+    
+    return jsonify({
+        'status': 'processing',
+        'task_id': task_id,
+        'total_files': len(saved_files)
+    })
+
 @app.route('/changelog')
 @login_required
 def changelog():
@@ -605,16 +855,35 @@ def upload():
     ampm = request.form.get('ampm', "오전")
     
     save_path = os.path.join(UPLOAD_DIR, datetime.now().strftime('%Y.%m.%d'), loc, ampm, reason)
-    os.makedirs(save_path, exist_ok=True)
+    
+    try:
+        os.makedirs(save_path, exist_ok=True)
+    except OSError as e:
+        if e.errno == 28:  # No space left on device
+            return "<h3>❌ 업로드 실패</h3><p><b>디스크 용량이 가득 찼습니다!</b></p><p>서버 저장 공간을 확보한 후 다시 시도해주세요.</p><a href='/'>메인으로</a>", 507
+        raise
 
     saved_files = []
     files = request.files.getlist('photos')
+    
     for f in files:
         if f.filename:
             safe_name = os.path.basename(f.filename)
             path = os.path.join(save_path, safe_name)
-            f.save(path)
-            saved_files.append(path)
+            try:
+                f.save(path)
+                saved_files.append(path)
+            except OSError as e:
+                # 디스크 용량 부족 (errno 28: ENOSPC)
+                if e.errno == 28 or "No space" in str(e) or "disk" in str(e).lower():
+                    # 이미 저장된 파일 정리
+                    for saved_path in saved_files:
+                        try:
+                            os.remove(saved_path)
+                        except:
+                            pass
+                    return "<h3>❌ 업로드 실패</h3><p><b>디스크 용량이 가득 찼습니다!</b></p><p>서버 저장 공간을 확보한 후 다시 시도해주세요.</p><a href='/'>메인으로</a>", 507
+                raise
 
     if not saved_files:
         return "파일이 업로드되지 않았습니다.", 400
@@ -649,7 +918,8 @@ def result_view(task_id):
     task = tasks[task_id]
     if task['status'] == 'error': return f"<h3>🔥 오류 발생</h3><a href='/'>메인으로</a>", 500
     if task['status'] == 'processing':
-        return f"<h3>⏳ 분석 중... ({task['current']} / {task['total']})</h3><script>setTimeout(function(){{ location.reload(); }}, 2000);</script>", 200
+        # progress.html 템플릿을 렌더링하여 진행률 바 표시
+        return render_template('progress.html', task_id=task_id, total=task['total'])
     return render_template('result.html', results=task['results'], report_text=task['report_text'], location=task['location'], reason=task['reason'])
 
 @app.route('/save', methods=['POST'])
@@ -824,11 +1094,33 @@ def send_discord_webhook(tunnel_url):
 def init_cloudflare_tunnel(port):
     """
     Cloudflare Tunnel 초기화
-    - CLOUDFLARE_TUNNEL_TOKEN이 설정된 경우: 고정 도메인 터널 사용
-    - 설정되지 않은 경우: Quick Tunnel (임시 trycloudflare.com URL) 사용
+    우선순위:
+    1. 이미 cloudflared가 실행 중이면 기존 터널 사용
+    2. config.yml + credentials-file 방식 (로컬 관리 터널)
+    3. 토큰 기반 방식 (원격 관리 터널)
+    4. Quick Tunnel (임시 trycloudflare.com URL)
     """
+    import glob
+    
     cf_filename = "cloudflared.exe"
     cf_url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
+    
+    tunnel_domain = get_cloudflare_tunnel_domain()
+    
+    # 이미 cloudflared가 실행 중인지 확인
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq cloudflared.exe"],
+            capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        if "cloudflared.exe" in result.stdout:
+            print("✅ cloudflared가 이미 실행 중 - 기존 터널 사용")
+            if tunnel_domain:
+                return f"https://{tunnel_domain}"
+            else:
+                return "[외부 터널 사용 중 - 도메인 설정에서 확인]"
+    except:
+        pass
 
     # cloudflared 다운로드
     if not os.path.exists(cf_filename):
@@ -841,18 +1133,51 @@ def init_cloudflare_tunnel(port):
         except Exception:
             return None
 
-    # 기존 프로세스 종료
+    # 기존 프로세스 종료 (새로 시작할 때만)
     os.system("taskkill /f /im cloudflared.exe >nul 2>&1")
     
     # Windows에서 콘솔 창 숨기기
     creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
     
-    # 고정 도메인 터널 (토큰 기반)
+    # 방법 1: config.yml 파일이 있는 경우 (로컬 관리 터널)
+    config_path = os.path.join(BASE_DIR, "config.yml")
+    if os.path.exists(config_path):
+        print("🔗 설정 파일(config.yml)로 터널 시작 중...")
+        
+        # credentials 파일 찾기
+        creds_files = [f for f in glob.glob(os.path.join(BASE_DIR, "*.json")) 
+                       if "package" not in os.path.basename(f).lower()]
+        
+        if creds_files:
+            creds_file = creds_files[0]
+            print(f"   인증 파일: {os.path.basename(creds_file)}")
+            cmd = [cf_filename, "tunnel", "--config", config_path, "--credentials-file", creds_file, "run"]
+            process = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding='utf-8', errors='replace',
+                creationflags=creation_flags
+            )
+            
+            # 터널 시작 대기
+            start_time = time.time()
+            while time.time() - start_time < 15:
+                line = process.stderr.readline()
+                if not line:
+                    time.sleep(0.5)
+                    continue
+                if "Registered tunnel connection" in line or "connIndex" in line:
+                    if tunnel_domain:
+                        return f"https://{tunnel_domain}"
+                    else:
+                        return "[설정 파일 터널 - 도메인 설정에서 확인]"
+            
+            print("⚠️ 설정 파일 터널 연결 시간 초과...")
+    
+    # 방법 2: 토큰 기반 (원격 관리 터널)
     tunnel_token = get_cloudflare_tunnel_token()
-    tunnel_domain = get_cloudflare_tunnel_domain()
     
     if tunnel_token:
-        print("🔗 고정 도메인 터널 시작 중...")
+        print("🔗 토큰으로 터널 시작 중...")
         cmd = [cf_filename, "tunnel", "run", "--token", tunnel_token]
         process = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -860,23 +1185,21 @@ def init_cloudflare_tunnel(port):
             creationflags=creation_flags
         )
         
-        # 터널 시작 대기 (연결 확인)
         start_time = time.time()
-        while time.time() - start_time < 10:
+        while time.time() - start_time < 15:
             line = process.stderr.readline()
             if not line:
                 time.sleep(0.5)
                 continue
-            # 연결 성공 메시지 확인
             if "Registered tunnel connection" in line or "connIndex" in line:
                 if tunnel_domain:
                     return f"https://{tunnel_domain}"
                 else:
-                    return "[고정 도메인 - 설정에서 CLOUDFLARE_TUNNEL_DOMAIN 확인]"
+                    return "[토큰 터널 - 도메인 설정에서 확인]"
         
-        print("⚠️ 고정 터널 연결 시간 초과, Quick Tunnel로 전환...")
+        print("⚠️ 토큰 터널 연결 시간 초과, Quick Tunnel로 전환...")
 
-    # Quick Tunnel (임시 URL)
+    # 방법 3: Quick Tunnel (임시 URL)
     print("🌐 Quick Tunnel 시작 중...")
     cmd = [cf_filename, "tunnel", "--url", f"http://localhost:{port}"]
     process = subprocess.Popen(
